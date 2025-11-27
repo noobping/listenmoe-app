@@ -1,9 +1,17 @@
+#[cfg(feature = "setup")]
+mod setup;
+
 mod listen;
 mod meta;
 
 use crate::listen::ListenMoeRadio;
 use crate::meta::Meta;
 use crate::meta::TrackInfo;
+
+#[cfg(feature = "setup")]
+use crate::setup::*;
+#[cfg(feature = "setup")]
+use adw::gio::SimpleAction;
 
 use adw::glib;
 use adw::prelude::*;
@@ -85,6 +93,7 @@ fn build_ui(app: &Application) {
     let window = ApplicationWindow::builder()
         .application(app)
         .title("Listen.moe Radio")
+        .icon_name("listenmoe")
         .default_width(300)
         .default_height(40)
         .resizable(false)
@@ -92,6 +101,24 @@ fn build_ui(app: &Application) {
 
     window.set_titlebar(Some(&header));
     window.set_child(Some(&dummy));
+
+    #[cfg(feature = "setup")]
+    let action = SimpleAction::new("setup", None);
+    #[cfg(feature = "setup")]
+    action.connect_activate(move |_, _| {
+        if !can_install_locally() {
+            return;
+        }
+        let _ = match is_installed_locally() {
+            true => uninstall_locally(),
+            false => install_locally(),
+        };
+    });
+
+    #[cfg(feature = "setup")]
+    window.add_action(&action);
+    #[cfg(feature = "setup")]
+    app.set_accels_for_action("win.setup", &["F1"]);
 
     // Poll the channel on the GTK main thread and update WindowTitle
     {

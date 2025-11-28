@@ -174,7 +174,7 @@ Comment={comment}
 Exec={exec} %u
 Icon={icon}
 Terminal=false
-Categories=Utility;
+Categories=AudioVideo;Player;GTK;
 ",
     );
 

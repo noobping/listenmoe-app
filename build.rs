@@ -1,5 +1,3 @@
-use std::{fs, path::Path};
-
 fn main() {
     glib_build_tools::compile_resources(&["icons"], "icons/resources.xml", "compiled.gresource");
 
@@ -9,6 +7,7 @@ fn main() {
 
 #[cfg(not(feature = "setup"))]
 fn desktop_file() {
+    use std::{fs, path::Path};
     let project = env!("CARGO_PKG_NAME");
     let dir = Path::new(".");
     let version = env!("CARGO_PKG_VERSION");

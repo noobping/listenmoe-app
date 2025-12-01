@@ -35,6 +35,9 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+          fetch-depth: 0
 
       - name: Build (release)
         run: cargo build --release --target ${{ matrix.target }}

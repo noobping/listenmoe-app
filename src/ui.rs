@@ -245,7 +245,7 @@ pub fn build_ui(app: &Application) {
     window.set_child(Some(&dummy));
 
     // Stations
-    for station in vec![Station::Jpop, Station::Kpop] {
+    for station in [Station::Jpop, Station::Kpop] {
         let action = create_station_action(station, &play_button, &window, &radio, &meta);
         window.add_action(&action);
         menu.append(

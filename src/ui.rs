@@ -1,4 +1,4 @@
-use crate::config::{APP_ID, RESOURCE_ID};
+use crate::config::APP_ID;
 use crate::listen::Listen;
 use crate::meta::{Meta, TrackInfo};
 use crate::station::Station;
@@ -12,28 +12,23 @@ use adw::{Application, WindowTitle};
 use gtk::{
     gdk::{gdk_pixbuf::Pixbuf, Display, Texture},
     gio::{Cancellable, MemoryInputStream, Menu, SimpleAction},
-    ApplicationWindow, Button, GestureClick, HeaderBar, IconTheme, MenuButton, Orientation,
-    Picture, Popover,
+    ApplicationWindow, Button, GestureClick, HeaderBar, MenuButton, Orientation, Picture, Popover,
 };
 use std::error::Error;
 use std::rc::Rc;
 use std::sync::mpsc;
-use std::sync::mpsc::TryRecvError;
 use std::thread;
 use std::time::Duration;
 
 /// Helper to create a station action that switches to the given station and starts playback if needed.
-///
-/// This helper avoids the duplicated code that previously existed in the `jpop` and `kpop` actions.
 fn create_station_action(
     station: Station,
     play_button: &Button,
     window: &ApplicationWindow,
     radio: &Rc<Listen>,
     meta: &Rc<Meta>,
-    action_name: &str,
 ) -> SimpleAction {
-    let action = SimpleAction::new(action_name, None);
+    let action = SimpleAction::new(station.name(), None);
     let radio = radio.clone();
     let meta = meta.clone();
     let win_clone = window.clone();
@@ -41,7 +36,6 @@ fn create_station_action(
     action.connect_activate(move |_, _| {
         radio.set_station(station);
         meta.set_station(station);
-        // If playback is currently stopped (play button visible), start playing automatically.
         if play.is_visible() {
             let _ = adw::prelude::WidgetExt::activate_action(
                 &win_clone,
@@ -62,6 +56,7 @@ pub fn build_ui(app: &Application) {
     // Channel from Meta worker to main thread
     let (tx, rx) = mpsc::channel::<TrackInfo>();
     let meta = Meta::new(station, tx);
+
     let (cover_tx, cover_rx) = mpsc::channel::<Result<Vec<u8>, String>>();
     let win_title = WindowTitle::new("LISTEN.moe", "JPOP/KPOP Radio");
 
@@ -106,10 +101,6 @@ pub fn build_ui(app: &Application) {
     // menu
     let menu = Menu::new();
     menu.append(Some("Copy title & artist"), Some("win.copy"));
-    menu.append(Some("Play J-pop"), Some("win.jpop"));
-    menu.append(Some("Play K-pop"), Some("win.kpop"));
-    menu.append(Some("About"), Some("win.about"));
-    menu.append(Some("Quite"), Some("win.quite"));
     let more_button = MenuButton::builder()
         .icon_name("view-more-symbolic")
         .tooltip_text("Main Menu")
@@ -244,13 +235,16 @@ pub fn build_ui(app: &Application) {
         window.add_action(&action);
     }
 
-    // Create station actions using the helper function. This removes duplicated closures for J-pop and K-pop.
-    let jpop_action =
-        create_station_action(Station::Jpop, &play_button, &window, &radio, &meta, "jpop");
-    let kpop_action =
-        create_station_action(Station::Kpop, &play_button, &window, &radio, &meta, "kpop");
-    window.add_action(&jpop_action);
-    window.add_action(&kpop_action);
+    for station in vec![Station::Jpop, Station::Kpop] {
+        let action = create_station_action(station, &play_button, &window, &radio, &meta);
+        window.add_action(&action);
+        menu.append(
+            Some(&format!("Play {}", station.display_name())),
+            Some(&format!("win.{}", station.name())),
+        );
+    }
+    menu.append(Some("About"), Some("win.about"));
+    menu.append(Some("Quite"), Some("win.quite"));
 
     {
         let win = win_title.clone();
@@ -289,19 +283,8 @@ pub fn build_ui(app: &Application) {
     app.set_accels_for_action("win.play", &["XF86AudioPlay"]);
     app.set_accels_for_action("win.stop", &["XF86AudioStop", "XF86AudioPause"]);
     app.set_accels_for_action("win.jpop", &["<primary>j", "XF86AudioPrev", "<primary>z"]);
-    app.set_accels_for_action(
-        "win.kpop",
-        &[
-            "<primary>k",
-            "XF86AudioNext",
-            "<primary><shift>z",
-            "<primary>y",
-        ],
-    );
-    app.set_accels_for_action(
-        "win.toggle",
-        &["<primary>p", "space", "Return", "<primary>s"],
-    );
+    app.set_accels_for_action("win.kpop", &["<primary>k", "XF86AudioNext", "<primary><shift>z", "<primary>y"]);
+    app.set_accels_for_action("win.toggle", &["<primary>p", "space", "Return", "<primary>s"]);
 
     // Poll the channels on the GTK main thread and update the UI. Using `try_iter()`
     // provides a clean iterator over any pending messages and reduces boilerplate.

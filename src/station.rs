@@ -18,4 +18,18 @@ impl Station {
             Station::Kpop => "wss://listen.moe/kpop/gateway_v2",
         }
     }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Station::Jpop => "jpop",
+            Station::Kpop => "kpop",
+        }
+    }
+
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Station::Jpop => "J-POP",
+            Station::Kpop => "K-POP",
+        }
+    }
 }

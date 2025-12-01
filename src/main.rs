@@ -7,6 +7,7 @@ mod listen;
 mod meta;
 mod station;
 mod ui;
+mod http_source;
 
 use crate::config::{APP_ID, RESOURCE_ID};
 use adw::prelude::*;

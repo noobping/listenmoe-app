@@ -1,105 +1,123 @@
-use reqwest::blocking::{Client, Response};
+use reqwest::blocking::{Client};
 use rodio::{buffer::SamplesBuffer, OutputStreamBuilder, Sink};
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::error::Error;
-use std::io::{self, Read, Seek, SeekFrom};
 use std::rc::Rc;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::mpsc;
 use std::thread;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::FormatOptions;
-use symphonia::core::io::{MediaSource, MediaSourceStream};
+use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
 use crate::station::Station;
+use crate::http_source::HttpSource;
 
-struct HttpSource {
-    inner: Response,
+type DynError = Box<dyn Error + Send + Sync + 'static>;
+type Result<T> = std::result::Result<T, DynError>;
+
+
+
+#[derive(Debug)]
+enum Control {
+    Stop,
 }
 
-impl Read for HttpSource {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.inner
-            .read(buf)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-    }
+#[derive(Debug)]
+enum State {
+    Stopped,
+    Playing { tx: mpsc::Sender<Control> },
 }
 
-impl Seek for HttpSource {
-    fn seek(&mut self, _pos: SeekFrom) -> io::Result<u64> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "seeking not supported on HTTP stream",
-        ))
-    }
+#[derive(Debug)]
+struct Inner {
+    station: Station,
+    state: State,
 }
 
-impl MediaSource for HttpSource {
-    fn is_seekable(&self) -> bool {
-        false
-    }
-
-    fn byte_len(&self) -> Option<u64> {
-        None
-    }
-}
-
+#[derive(Debug)]
 pub struct Listen {
-    station: Cell<Station>,
-    running: Cell<bool>,
-    stop_flag: RefCell<Option<Arc<AtomicBool>>>,
+    inner: RefCell<Inner>,
 }
 
 impl Listen {
     pub fn new(station: Station) -> Rc<Self> {
         Rc::new(Self {
-            station: Cell::new(station),
-            running: Cell::new(false),
-            stop_flag: RefCell::new(None),
+            inner: RefCell::new(Inner {
+                station,
+                state: State::Stopped,
+            }),
         })
     }
 
-    pub fn set_station(self: &Rc<Self>, station: Station) {
-        let was_running = self.running.get();
-        if was_running {
-            self.stop();
+    pub fn set_station(&self, station: Station) {
+        let mut inner = self.inner.borrow_mut();
+
+        let was_playing = matches!(inner.state, State::Playing { .. });
+        if was_playing {
+            Self::stop_inner(&mut inner);
         }
-        self.station.set(station);
-        if was_running {
-            self.start();
+
+        inner.station = station;
+
+        if was_playing {
+            Self::start_inner(&mut inner);
         }
     }
 
-    pub fn start(self: &Rc<Self>) {
-        if self.running.get() {
-            return;
-        }
-        self.running.set(true);
-
-        let stop = Arc::new(AtomicBool::new(false));
-        *self.stop_flag.borrow_mut() = Some(stop.clone());
-
-        let station = self.station.get();
-        thread::spawn(move || {
-            let _ = run_listenmoe_stream(station, stop);
-        });
+    pub fn start(&self) {
+        let mut inner = self.inner.borrow_mut();
+        Self::start_inner(&mut inner);
     }
 
     pub fn stop(&self) {
-        self.running.set(false);
-        if let Some(stop) = self.stop_flag.borrow_mut().take() {
-            stop.store(true, Ordering::SeqCst);
+        let mut inner = self.inner.borrow_mut();
+        Self::stop_inner(&mut inner);
+    }
+
+    fn start_inner(inner: &mut Inner) {
+        match inner.state {
+            State::Playing { .. } => {
+                // already playing
+                return;
+            }
+            State::Stopped => {
+                let (tx, rx) = mpsc::channel::<Control>();
+                let station = inner.station;
+
+                inner.state = State::Playing { tx: tx.clone() };
+
+                // detached worker thread; will exit on Stop or error
+                thread::spawn(move || {
+                    if let Err(err) = run_listenmoe_stream(station, rx) {
+                        eprintln!("stream error: {err}");
+                    }
+                });
+            }
         }
+    }
+
+    fn stop_inner(inner: &mut Inner) {
+        if let State::Playing { tx } = &inner.state {
+            // Ignore send errors (thread might already be gone)
+            let _ = tx.send(Control::Stop);
+        }
+        inner.state = State::Stopped;
     }
 }
 
-fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), Box<dyn Error>> {
+impl Drop for Listen {
+    fn drop(&mut self) {
+        // Best-effort cleanup
+        let mut inner = self.inner.borrow_mut();
+        Self::stop_inner(&mut inner);
+    }
+}
+
+fn run_listenmoe_stream(station: Station, rx: mpsc::Receiver<Control>) -> Result<()> {
     let url = station.stream_url();
     println!("Connecting to {url}…");
 
@@ -133,7 +151,7 @@ fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), B
         .tracks()
         .iter()
         .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .ok_or("no supported audio tracks")?;
+        .ok_or_else(|| "no supported audio tracks".to_string())?;
 
     let mut track_id = track.id;
     let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &decoder_opts)?;
@@ -147,7 +165,18 @@ fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), B
     let mut channels: u16 = 0;
     let mut sample_rate: u32 = 0;
 
-    while !stop.load(Ordering::Relaxed) {
+    loop {
+        // Check for control messages first
+        match rx.try_recv() {
+            Ok(Control::Stop) | Err(mpsc::TryRecvError::Disconnected) => {
+                println!("Stop requested, shutting down stream.");
+                break;
+            }
+            Err(mpsc::TryRecvError::Empty) => {
+                // no command, continue
+            }
+        }
+
         let packet = match format.next_packet() {
             Ok(p) => p,
             Err(SymphoniaError::ResetRequired) => {
@@ -156,7 +185,7 @@ fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), B
                     .tracks()
                     .iter()
                     .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-                    .ok_or("no supported audio tracks after reset")?;
+                    .ok_or_else(|| "no supported audio tracks after reset".to_string())?;
 
                 track_id = new_track.id;
                 decoder = symphonia::default::get_codecs()
@@ -185,7 +214,7 @@ fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), B
                     .tracks()
                     .iter()
                     .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-                    .ok_or("no supported audio tracks after decoder reset")?;
+                    .ok_or_else(|| "no supported audio tracks after decoder reset".to_string())?;
 
                 track_id = new_track.id;
                 decoder = symphonia::default::get_codecs()
@@ -210,14 +239,14 @@ fn run_listenmoe_stream(station: Station, stop: Arc<AtomicBool>) -> Result<(), B
             sample_buf = Some(SampleBuffer::<f32>::new(duration, spec));
         }
 
-        let buf = sample_buf.as_mut().unwrap();
+        let buf = sample_buf.as_mut().expect("sample_buf just initialized");
         buf.copy_interleaved_ref(decoded);
 
-        let samples: Vec<f32> = buf.samples().to_vec();
+        let samples = buf.samples().to_owned();
         let source = SamplesBuffer::new(channels, sample_rate, samples);
         sink.append(source);
     }
-    sink.stop();
 
+    sink.stop();
     Ok(())
 }

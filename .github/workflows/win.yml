@@ -78,11 +78,8 @@ jobs:
         with:
           repository: ${{ github.repository }}
 
-      - name: Upload asset to release
-        uses: ncipollo/release-action@v1.20.0
+      - name: Release
+        uses: softprops/action-gh-release@v2
         with:
-          tag: ${{ steps.get_latest_release.outputs.release }}
-          allowUpdates: true
-          removeArtifacts: false
-          artifacts: "listenmoe-windows.zip"
-          token: ${{ secrets.GITHUB_TOKEN }}
+          files: "listenmoe-windows.zip"
+          overwrite_files: true

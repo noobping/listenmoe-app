@@ -1,5 +1,8 @@
 name: Linux
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   push:
@@ -27,6 +30,27 @@ jobs:
       BIN_NAME: listenmoe
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+          fetch-depth: 0
+      - run: dnf install -y git
+
+      - name: Resolve tag to use
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+          echo "--- tags ---"
+          git tag --list
+
+          echo "--- describe ---"
+          TAG=$(git describe --tags --abbrev=0)
+          echo "Using tag from git describe: $TAG"
+
+          # export for later steps
+          echo "LATEST_TAG=$TAG" >> "$GITHUB_ENV"
+
       - name: Install build deps
         run: |
           dnf -y update
@@ -35,34 +59,11 @@ jobs:
             cairo-devel gcc git glib2-devel gtk4-devel libadwaita-devel make \
             openssl-devel pango-devel pkg-config pkgconf-pkg-config \
             rustup
-          
+
           rustup-init -y --profile minimal --default-toolchain stable
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           "$HOME/.cargo/bin/rustup" target add x86_64-unknown-linux-gnu
           "$HOME/.cargo/bin/rustup" target add aarch64-unknown-linux-gnu
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-tags: true
-          fetch-depth: 0
-
-      - name: Debug git tags
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git status
-          echo "--- tags ---"
-          git tag --list
-          echo "--- describe ---"
-          git describe --tags --abbrev=0 || echo "git describe failed"
-
-      - name: Resolve tag to use
-        id: get_tag
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          TAG=$(git describe --tags --abbrev=0)
-          echo "Using tag: $TAG"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Build (release)
         run: cargo build --release --target ${{ matrix.target }} --features setup
@@ -76,9 +77,12 @@ jobs:
           name: ${{ env.BIN_NAME }}-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/${{ env.BIN_NAME }}
 
+      - name: Show tag we will release
+        run: echo "Releasing tag: ${{ env.LATEST_TAG }}"
+
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.get_tag.outputs.tag }}
+          tag_name: ${{ env.LATEST_TAG }}
           files: target/${{ matrix.target }}/release/${{ env.BIN_NAME }}
           overwrite_files: true

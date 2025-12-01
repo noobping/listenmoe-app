@@ -2,14 +2,14 @@
 #[cfg(feature = "setup")]
 mod setup;
 
-mod config;
 mod listen;
 mod meta;
 mod station;
 mod ui;
 mod http_source;
 
-use crate::config::{APP_ID, RESOURCE_ID};
+const APP_ID: &str = env!("APP_ID");
+const RESOURCE_ID: &str = env!("RESOURCE_ID");
 use adw::prelude::*;
 use adw::Application;
 use gtk::{gdk::Display, IconTheme};

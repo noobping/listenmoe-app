@@ -1,4 +1,3 @@
-use crate::config::APP_ID;
 use crate::listen::Listen;
 use crate::meta::{Meta, TrackInfo};
 use crate::station::Station;
@@ -21,6 +20,7 @@ use std::thread;
 use std::time::Duration;
 
 const COVER_MAX_SIZE: i32 = 250;
+const APP_ID: &str = env!("APP_ID");
 
 fn make_action<F>(name: &str, f: F) -> SimpleAction
 where

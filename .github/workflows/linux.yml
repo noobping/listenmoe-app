@@ -18,8 +18,6 @@ jobs:
             target: aarch64-unknown-linux-gnu
 
     runs-on: ${{ matrix.os }}
-    container:
-      image: fedora:43
 
     permissions:
       contents: write
@@ -30,27 +28,13 @@ jobs:
       BIN_NAME: listenmoe
 
     steps:
-      - name: Install build deps
-        run: |
-          dnf -y update
-          dnf -y install \
-            mold alsa-lib-devel libgpg-error-devel clang pkg-config nettle-devel \
-            cairo-devel gcc git glib2-devel gtk4-devel libadwaita-devel make \
-            openssl-devel pango-devel pkg-config pkgconf-pkg-config \
-            rustup
-
-          rustup-init -y --profile minimal --default-toolchain stable
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          "$HOME/.cargo/bin/rustup" target add x86_64-unknown-linux-gnu
-          "$HOME/.cargo/bin/rustup" target add aarch64-unknown-linux-gnu
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-tags: true
           fetch-depth: 0
 
-      - name: Tag
+      - name: Version
         id: tag
         shell: bash
         run: |
@@ -61,11 +45,36 @@ jobs:
             echo "TAG_NAME=$latest_tag" >> "$GITHUB_ENV"
           fi
 
-      - name: Build (release)
-        run: cargo build --release --target ${{ matrix.target }} --features setup
+      - name: Dependencies
+        run: |
+          apt update
+          apt install build-essential
+            cargo \
+            clang \
+            gcc \
+            git \
+            libadwaita-1-dev \
+            libasound2-dev \
+            libcairo2-dev \
+            libglib2.0-dev \
+            libgpg-error-dev \
+            libgtk-4-dev \
+            libpango1.0-dev \
+            librust-libadwaita-dev \
+            libssl-dev \
+            make \
+            mold \
+            nettle-dev \
+            pkg-config \
+            pkgconf
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: List produced binary
-        run: ls -R target/${{ matrix.target }}/release
+      - name: Build
+        run: cargo build --release --features setup
+
+      - name: Debug
+        run: ls -R target
 
       - name: Upload executable
         uses: actions/upload-artifact@v4

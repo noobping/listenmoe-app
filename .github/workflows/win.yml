@@ -56,22 +56,23 @@ jobs:
         run: |
           C:\tools\msys64\usr\bin\bash -lc "
             set -e
-            cd \"$GITHUB_WORKSPACE\"
 
-            EXE=target/x86_64-pc-windows-gnu/release/listenmoe.exe
-            mkdir -p dist
-            cp \"$EXE\" dist/
+            WIN_DIST=\"$GITHUB_WORKSPACE/dist\"
+            mkdir -p \"$WIN_DIST\"
+
+            EXE=\"$GITHUB_WORKSPACE/target/x86_64-pc-windows-gnu/release/listenmoe.exe\"
+
+            cp \"$EXE\" \"$WIN_DIST/\"
 
             echo 'Collecting DLL dependencies with ntldd...'
             ntldd -R \"$EXE\" \
               | awk '/=>/ { print \$3 }' \
               | sort -u \
               | while read -r dll; do
-                  # Only bundle MinGW runtime/libs, skip system DLLs
                   case \"\$dll\" in
                     *mingw64/bin/*)
                       echo \"Copying \$dll\"
-                      cp -u \"\$dll\" dist/
+                      cp -u \"\$dll\" \"$WIN_DIST/\"
                       ;;
                   esac
                 done

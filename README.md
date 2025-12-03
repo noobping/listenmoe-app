@@ -4,7 +4,7 @@
 
 # The world's cutest radio
 
-The world's cutest radio. Dive into pure kawaii energy with nonstop Japanese and Korean hits, streamed straight from LISTEN.moe.
+The world's cutest radio. Dive into pure kawaii energy with nonstop Japanese and Korean hits, streamed straight from [LISTEN.moe](https://listen.moe/).
 
 ![screenshot](data/screenshot.png)
 
